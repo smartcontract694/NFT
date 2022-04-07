@@ -1,0 +1,213 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+pragma solidity ^0.4.21;
+
+import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+
+import "hardhat/console.sol";
+import "./NFT.sol";
+
+contract marketplace {
+//Mapped values (real values-SC values):
+///0 - 50, 0.5 - 50, 1 - 100, 1.5- 150, 2 - 200, 2.5 - 250, 3 -300, 3.5 - 350, 4-400, 4.5- 450, 5 -500
+mapping(address=>uint) UserRatings;
+mapping(address=>uint) UserNumberofRaters; //number of people who submitted a rating
+mapping(uint=>uint) WeightPercentage; //mapping between SC ratings and percentage
+
+
+address marketplace; //marketplace EA
+mapping(address=>bool) RegisteredArtists;
+mapping(address=>bool) RegisteredSellers;
+mapping(address=>bool) Stakes;
+mapping(address=>bool) RegisteredBuyers;
+mapping (address=> address) sellerContracts;//address of each seller is mapped to address of SC
+//event
+event NewChildSellerContractAddedSuccessfully(address seller, address sellerContract);
+event NFTransferredToNewOwner(address from, address to, uint tokenid);
+event BuyerRewardedSuccessfully(address buyer, address seller, uint256 reward );
+
+    function marketplace() public{
+       marketplace= msg.sender;
+       WeightPercentage [0] = 0;
+  WeightPercentage [50] = 10;
+  WeightPercentage [100] = 20;
+  WeightPercentage [150] = 30;
+  WeightPercentage [200] = 40;
+  WeightPercentage [250] = 50;
+  WeightPercentage [300] = 60;
+  WeightPercentage [350] = 70;
+  WeightPercentage [400] = 80;
+  WeightPercentage [450] = 90;
+  WeightPercentage [500] = 100;
+    }
+   
+    modifier onlyMarketplace{
+      require(msg.sender == marketplace);
+      _;
+    }
+    
+    modifier onlyRegisteredBuyer{
+      require(RegisteredBuyers[msg.sender]); 
+      _;
+    }
+
+    modifier onlyRegisteredSeller{
+      require(RegisteredSellers[msg.sender]); 
+      _;
+    }
+    //events
+event announceRatingandReputation(uint newWeightedRating, uint newReputation, uint NumOfRaters, string note);
+event announceRewardPercentage(uint reward);
+event WeightPercentageFinding(uint percentage,  address user);
+
+
+///////////////////
+//Reputation /////
+/////////////////
+
+
+  //rating entered here must fall in between 0 and 500 with increments of 50
+  function ComputeUserReputation(uint rating, uint weight , address user ) onlyMarketplace public
+  {
+      //weight here is already multiplied by 100
+    
+ if(weight >=0 && weight < 50)
+        weight = 0;   //0%
+    else if(weight >= 50 && weight<100)
+        weight = 50; //10%
+    else if(weight >=100 && weight < 150)
+        weight = 100;//20%
+    else if(weight >= 150 && weight < 200)
+        weight = 150; //30%
+    else if(weight >=200 && weight < 250)
+        weight = 200; //40%
+    else if(weight >=250 && weight < 300)
+        weight = 250; //50%
+    else if(weight >= 300 && weight < 350)
+        weight = 300; //60%
+    else if(weight >= 350 && weight < 400)
+        weight = 350;//70%
+    else if(weight >=400 && weight < 450)
+        weight = 400; //80%
+    else if(weight >=450 && weight < 500)
+        weight = 450; //90%
+    else 
+        weight = 500; //100%
+
+   uint newRating = rating * WeightPercentage[weight];
+
+    uint newReputation = newRating + UserRatings[user];
+    UserRatings[user] = newReputation;//update the value in the mapping
+    uint newUserCount =  ++UserNumberofRaters[user];
+    emit announceRatingandReputation(newRating, newReputation, newUserCount, "new reputation /10000, then /count");   
+
+  } 
+    //weight is a value netween 0 and 500, the returned value will be divided by 1000 later
+  function ComputeReward(uint weight)  internal returns (uint)
+  {
+      require(weight >=0 && weight <= 500);
+      if(weight == 0)
+      {
+        emit announceRewardPercentage(0);
+        return 0;
+      }
+      else if(weight > 0 && weight < 200)
+      {
+          emit announceRewardPercentage(15);
+          return 15;
+      }
+      else if(weight >=200 && weight < 350)
+      {
+          emit announceRewardPercentage(20);
+          return 20;
+      }
+      else if(weight >= 350 && weight <= 500)
+      { 
+          emit announceRewardPercentage(25);
+          return 25;
+      }
+      
+  }
+///////////////////////
+///Registration////
+//////////////////////
+ 
+   //Artists
+    function RegisterArtist(address a) onlyMarketplace public{
+        RegisteredArtists[a]=true;
+    }
+   
+    function RevokeArtist(address a) onlyMarketplace public{
+        RegisteredArtists[a]=false;
+    }
+   
+    function RegisteredArtist(address a) public {
+        require(RegisteredArtists[a]);
+       
+    }
+    //Sellers
+      function RegisterSeller(address a) onlyMarketplace public{
+          require(Stakes[a] == true);
+        RegisteredSellers[a]=true;
+    }
+   uint stake = 5;
+   event StakeDepositedByUser(address user);
+   function DepositStake() payable public
+   {
+       require(msg.value == stake * 1 ether && Stakes[msg.sender] == false && RegisteredSellers[msg.sender] == false);
+       Stakes[msg.sender] = true;
+      emit StakeDepositedByUser(msg.sender);
+
+   }
+    function RevokeSeller(address a) onlyMarketplace public{
+        RegisteredSellers[a]=false;
+    }
+   
+    function RegisteredSeller(address a) public {
+        require(RegisteredSellers[a]);
+    }
+     //Buyers
+      function RegisterBuyer(address a) onlyMarketplace public{
+        RegisteredBuyers[a]=true;
+    }
+   
+    function RevokeBuyer(address a) onlyMarketplace public{
+        RegisteredBuyers[a]=false;
+    }
+   
+    function RegisteredBuyer(address a) public {
+        require(RegisteredBuyers[a]);    
+       
+    }
+
+
+function addChildren(address seller, address sellerContract) public onlyMarketplace{
+    RegisteredSeller(seller);//seller must be registered
+    sellerContracts[seller] = sellerContract;
+    emit NewChildSellerContractAddedSuccessfully(seller, sellerContract);
+}
+
+function BuyNFT(address seller, uint256 tokenId, uint256 price) onlyRegisteredBuyer payable public
+{
+    assert(msg.value == (price * 1 ether));
+    address sellerContract = sellerContracts[seller];
+    //nf.setApprovalForAll(sellerContract, true);
+    (seller).transfer(msg.value);
+    NFT(sellerContract).TransferNFTOwnership(tokenId, msg.sender);
+     //NFT(sellerContract).transferFrom(seller, msg.sender, tokenId);
+    emit NFTransferredToNewOwner(seller, msg.sender, tokenId);
+}
+
+function RewardBuyer(address buyer, uint256 weight, uint256 price, uint256 tokenId) onlyRegisteredSeller payable public 
+{
+    uint reward = (ComputeReward(weight) * price)/1000;
+    require(msg.value == reward);
+    (buyer).transfer(msg.value);//transfer of reward
+    emit BuyerRewardedSuccessfully(buyer, msg.sender, reward );
+}
+  
+
+  
+
+}
